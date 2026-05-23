@@ -144,7 +144,13 @@ def flag(country_iso2: str) -> str:
            chr(0x1F1E6 + ord(country_iso2[1].upper()) - ord("A"))
 
 def player_info(name: str):
-    p = PLAYERS.get(name, {"first": "", "country": "", "rank": 999})
+    p = PLAYERS.get(name, {"first": "", "country": "", "rank": 999}).copy()
+    # Classements fetchés depuis ESPN, stockés dans data["rankings"]
+    fetched = st.session_state.get("data", {}).get("rankings", {})
+    last = name.split()[-1]
+    rank_override = fetched.get(name) or fetched.get(last)
+    if rank_override:
+        p["rank"] = rank_override
     return p
 
 def player_label(name: str) -> str:
@@ -658,11 +664,14 @@ with st.sidebar:
             st.warning(f"{msg}\n\nSaisissez le tableau manuellement ci-dessous.")
 
     if st.button("📊 Fetch classements ATP"):
-        with st.spinner("Récupération classements..."):
+        with st.spinner("Récupération classements ESPN..."):
             rankings = fetch_atp_rankings_espn()
         if rankings:
+            data["rankings"] = rankings
             st.session_state["fetched_rankings"] = rankings
-            st.success(f"✅ {len(rankings)} joueurs mis à jour.")
+            save()
+            st.success(f"✅ {len(rankings)} classements sauvegardés et appliqués.")
+            st.rerun()
         else:
             st.warning("Classements non disponibles.")
 
