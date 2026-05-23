@@ -34,7 +34,7 @@ PLAYERS = {
     "Tiafoe":            {"first": "Frances",       "country": "US", "rank": 23},
     "Griekspoor":        {"first": "Tallon",        "country": "NL", "rank": 36},
     "Arnaldi":           {"first": "Matteo",        "country": "IT", "rank": 46},
-    "Muller":         {"first": "Alexandre",     "country": "FR", "rank": 41},
+    "Muller A.":         {"first": "Alexandre",     "country": "FR", "rank": 41},
     "Tsitsipas":         {"first": "Stefanos",      "country": "GR", "rank": 12},
     "Collignon":         {"first": "Raphael",       "country": "BE", "rank": 88},
     "Vukic":             {"first": "Aleksandar",    "country": "AU", "rank": 71},
@@ -51,11 +51,11 @@ PLAYERS = {
     "Norrie":            {"first": "Cameron",       "country": "GB", "rank": 67},
     "Vallejo":           {"first": "Daniel",        "country": "PY", "rank": 185},
     "Cilic":             {"first": "Marin",         "country": "HR", "rank": 95},
-    "Kouame":            {"first": "Moise",       "country": "FR", "rank": 313},
+    "Kouame":            {"first": "Eliakim",       "country": "FR", "rank": 180},
     "Tabilo":            {"first": "Alejandro",     "country": "CL", "rank": 33},
     "Majchrzak":         {"first": "Kamil",         "country": "PL", "rank": 78},
     "Faurel":            {"first": "Hugo",          "country": "FR", "rank": 310},
-    "Vacherot":          {"first": "Valentin",      "country": "MC", "rank": 18},
+    "Vacherot":          {"first": "Valentin",      "country": "MC", "rank": 40},
     "Cobolli":           {"first": "Flavio",        "country": "IT", "rank": 19},
     "Pellegrino":        {"first": "Andrea",        "country": "IT", "rank": 158},
     "Wu Yibing":         {"first": "Yibing",        "country": "CN", "rank": 152},
@@ -334,64 +334,136 @@ def fetch_livescore_scrape():
     except Exception:
         return {}
 
-# ── Fetch tableau officiel Roland-Garros ──────────────────────────────────────
-def fetch_rg_draw() -> tuple[list[tuple[str, str]], str]:
+# ── Fetch tableau & classements depuis SofaScore ─────────────────────────────
+SOFASCORE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "application/json",
+    "Referer": "https://www.sofascore.com/",
+}
+
+def _sofascore_rg_season_id() -> int | None:
+    """Cherche l'ID de saison Roland-Garros 2026 sur SofaScore (tournament 2981 = RG hommes)."""
+    try:
+        r = requests.get(
+            "https://api.sofascore.com/api/v1/unique-tournament/2981/seasons",
+            headers=SOFASCORE_HEADERS, timeout=8
+        )
+        if r.status_code != 200:
+            return None
+        for s in r.json().get("seasons", []):
+            if "2026" in s.get("name", ""):
+                return s["id"]
+    except Exception:
+        pass
+    return None
+
+def fetch_draw_sofascore() -> tuple[list[tuple[str, str]], str]:
     """
-    Tente de récupérer les paires de joueurs du 1er tour depuis plusieurs sources.
-    Retourne (liste de (joueurA, joueurB), message_status).
+    Récupère le tableau du 1er tour depuis l'API SofaScore.
+    Retourne (liste de (nomA, nomB) par ordre de match, message).
+    """
+    season_id = _sofascore_rg_season_id()
+    if season_id is None:
+        return [], "SofaScore : saison 2026 non trouvée"
+    pairs: list[tuple[str, str]] = []
+    try:
+        page = 0
+        while True:
+            r = requests.get(
+                f"https://api.sofascore.com/api/v1/unique-tournament/2981/season/{season_id}/events/last/{page}",
+                headers=SOFASCORE_HEADERS, timeout=8
+            )
+            if r.status_code != 200:
+                break
+            events = r.json().get("events", [])
+            if not events:
+                break
+            for ev in events:
+                ri = ev.get("roundInfo", {})
+                if ri.get("round") == 1:
+                    home = ev.get("homeTeam", {}).get("name", "").strip()
+                    away = ev.get("awayTeam", {}).get("name", "").strip()
+                    if home and away:
+                        pairs.append((home, away))
+            page += 1
+            if page > 5:
+                break
+    except Exception as e:
+        return pairs, f"Erreur SofaScore : {e}"
+    if pairs:
+        return pairs, f"✅ {len(pairs)} matchs récupérés via SofaScore"
+    return [], "SofaScore : aucun match du 1er tour trouvé"
+
+def fetch_atp_rankings_sofascore() -> dict[str, int]:
+    """
+    Récupère le classement ATP depuis SofaScore.
+    Retourne {nom_joueur: rang}.
+    """
+    rankings: dict[str, int] = {}
+    try:
+        r = requests.get(
+            "https://api.sofascore.com/api/v1/rankings/type/15",
+            headers=SOFASCORE_HEADERS, timeout=10
+        )
+        if r.status_code != 200:
+            return rankings
+        rows = r.json().get("rankings", [])
+        for row in rows:
+            name = row.get("team", {}).get("name", "").strip()
+            rank = row.get("ranking", 0)
+            if name and rank:
+                # Stocke aussi juste le nom de famille (dernier mot)
+                last = name.split()[-1]
+                rankings[last] = rank
+                rankings[name] = rank
+    except Exception:
+        pass
+    return rankings
+
+def parse_draw_text(text: str) -> list[tuple[str, str]]:
+    """
+    Parse une saisie manuelle du tableau.
+    Formats acceptés par ligne :
+      - "Joueur A vs Joueur B"
+      - "Joueur A - Joueur B"
+      - "Joueur A / Joueur B"
+    Lignes vides ou sans séparateur → ignorées.
     """
     import re
-    UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    sources = [
-        ("Flashscore",  "https://www.flashscore.com/tennis/roland-garros-2026/"),
-        ("ATP Tour",    "https://www.atptour.com/en/scores/archive/roland-garros/520/2026/draws"),
-        ("RG officiel", "https://www.rolandgarros.com/en-us/draws"),
-    ]
     pairs: list[tuple[str, str]] = []
-    for name, url in sources:
-        try:
-            r = requests.get(url, headers={"User-Agent": UA, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=10)
-            if r.status_code != 200:
-                continue
-            text = r.text
-            # Pattern générique : cherche des paires "Nom vs Nom" ou "Nom - Nom"
-            found = re.findall(
-                r'([A-Z][a-záàâäéèêëîïôöùûüç\'.\- ]{2,25})\s*(?:vs\.?|-)\s*([A-Z][a-záàâäéèêëîïôöùûüç\'.\- ]{2,25})',
-                text
-            )
-            # filtre les faux-positifs courts
-            found = [(a.strip(), b.strip()) for a, b in found if len(a) > 3 and len(b) > 3]
-            if len(found) >= 10:
-                pairs = found
-                return pairs, f"✅ {len(pairs)} paires trouvées via {name}"
-        except Exception:
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line:
             continue
-    return [], "❌ Aucune source n'a pu être lue (sites anti-scraping ou format inconnu)"
+        m = re.split(r'\s+(?:vs\.?|[-/])\s+', line, maxsplit=1, flags=re.IGNORECASE)
+        if len(m) == 2:
+            a, b = m[0].strip(), m[1].strip()
+            if a and b:
+                pairs.append((a, b))
+    return pairs
 
-def apply_draw_to_matchs(matchs: list, pairs: list[tuple[str, str]]) -> tuple[list, int]:
+def rebuild_premier_tour(matchs: list, pairs: list[tuple[str, str]]) -> list:
     """
-    Pour les matchs dont ja ou jb contient 'Q', 'TBD' ou est vide,
-    tente de les remplacer avec les données du tableau récupéré.
-    Retourne (matchs mis à jour, nombre de remplacements).
+    Remplace TOUS les matchs du 1er tour par les nouvelles paires.
+    Les autres tours sont conservés intacts.
+    Les matchs supprimés voient leurs pronostics perdus.
     """
-    placeholders = {"q", "tbd", "", "qualifié", "qualifier"}
-    replaced = 0
-    pair_idx = 0
-    for m in matchs:
-        if pair_idx >= len(pairs):
-            break
-        ja_low = m["ja"].strip().lower()
-        jb_low = m["jb"].strip().lower()
-        needs_update = ja_low in placeholders or jb_low in placeholders
-        if needs_update:
-            new_a, new_b = pairs[pair_idx]
-            if ja_low in placeholders:
-                m["ja"] = new_a
-            if jb_low in placeholders:
-                m["jb"] = new_b
-            replaced += 1
-            pair_idx += 1
-    return matchs, replaced
+    autres = [m for m in matchs if m.get("tour") != "1er tour"]
+    max_id = max((m["id"] for m in matchs), default=0)
+    nouveaux = []
+    for i, (ja, jb) in enumerate(pairs):
+        max_id += 1
+        nouveaux.append({
+            "id": max_id,
+            "tour": "1er tour",
+            "ja": ja,
+            "jb": jb,
+            "p1w": "", "p1s": "",
+            "p2w": "", "p2s": "",
+            "rw": "", "rs": "",
+            "source": "",
+        })
+    return nouveaux + autres
 
 def match_key(ja, jb):
     return f"{ja.split()[-1].lower()}_{jb.split()[-1].lower()}"
@@ -582,18 +654,59 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.subheader("🎾 Tableau officiel")
-    st.caption("Remplace automatiquement les cases 'Q' / 'TBD' par les vrais noms.")
-    if st.button("🔍 Fetch tableau Roland-Garros"):
-        with st.spinner("Récupération du tableau en ligne..."):
-            pairs, status_msg = fetch_rg_draw()
+    st.subheader("🏗️ Reconstruire le tableau")
+    st.caption("Repart de zéro pour le 1er tour — les pronostics déjà saisis seront perdus.")
+
+    if st.button("🔍 Fetch auto via SofaScore"):
+        with st.spinner("Connexion à SofaScore..."):
+            pairs, msg = fetch_draw_sofascore()
         if pairs:
-            data["matchs"], nb_replaced = apply_draw_to_matchs(data["matchs"], pairs)
+            st.session_state["draw_preview"] = pairs
+            st.success(f"{msg} — vérifiez ci-dessous puis confirmez.")
+        else:
+            st.warning(f"{msg}\n\nSaisissez le tableau manuellement ci-dessous.")
+
+    if st.button("📊 Fetch classements ATP"):
+        with st.spinner("Récupération classements..."):
+            rankings = fetch_atp_rankings_sofascore()
+        if rankings:
+            st.session_state["fetched_rankings"] = rankings
+            st.success(f"✅ {len(rankings)} joueurs mis à jour.")
+        else:
+            st.warning("Classements non disponibles.")
+
+    preview = st.session_state.get("draw_preview", [])
+    if preview:
+        st.caption(f"Aperçu ({len(preview)} matchs) :")
+        for i, (a, b) in enumerate(preview[:5]):
+            st.markdown(f"  {i+1}. {a} vs {b}")
+        if len(preview) > 5:
+            st.caption(f"… et {len(preview)-5} autres matchs")
+        if st.button("✅ Confirmer et reconstruire le 1er tour"):
+            data["matchs"] = rebuild_premier_tour(data["matchs"], preview)
+            rankings = st.session_state.get("fetched_rankings", {})
+            if rankings:
+                for m in data["matchs"]:
+                    for name in [m["ja"], m["jb"]]:
+                        last = name.split()[-1]
+                        if last in rankings and name not in PLAYERS:
+                            PLAYERS[name] = {"first": "", "country": "", "rank": rankings[last]}
+            del st.session_state["draw_preview"]
             save()
-            st.success(f"{status_msg}\n{nb_replaced} joueur(s) mis à jour.")
+            st.rerun()
+
+    st.markdown("**Ou saisissez manuellement :**")
+    st.caption("Un match par ligne : `Joueur A vs Joueur B`")
+    draw_text = st.text_area("Tableau 1er tour", height=180, placeholder="Sinner vs Tabur\nFearnley vs Cerundolo\n...")
+    if st.button("📋 Appliquer la saisie manuelle") and draw_text.strip():
+        pairs = parse_draw_text(draw_text)
+        if pairs:
+            data["matchs"] = rebuild_premier_tour(data["matchs"], pairs)
+            save()
+            st.success(f"✅ {len(pairs)} matchs reconstruits.")
             st.rerun()
         else:
-            st.warning(status_msg)
+            st.error("Format non reconnu. Utilisez : Joueur A vs Joueur B")
 
     st.divider()
     st.subheader("Ajouter un match")
