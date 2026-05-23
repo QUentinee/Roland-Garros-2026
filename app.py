@@ -144,22 +144,23 @@ def flag(country_iso2: str) -> str:
            chr(0x1F1E6 + ord(country_iso2[1].upper()) - ord("A"))
 
 def player_info(name: str):
-    # Cherche d'abord par nom exact, sinon par nom de famille (dernier mot)
-    if name in PLAYERS:
-        p = PLAYERS[name].copy()
-    else:
-        last = name.split()[-1]
-        p = PLAYERS.get(last, {"first": "", "country": "", "rank": 999}).copy()
-        # Si trouvé par nom de famille, garde le prénom complet d'ESPN
-        if last in PLAYERS and not p.get("first"):
-            p["first"] = " ".join(name.split()[:-1])
-    # Classements fetchés depuis ESPN, stockés dans data["rankings"]
-    fetched = st.session_state.get("data", {}).get("rankings", {})
     last = name.split()[-1]
-    rank_override = fetched.get(name) or fetched.get(last)
-    if rank_override:
-        p["rank"] = rank_override
-    return p
+    # 1. Base ESPN fetchée (data["players"]) — priorité absolue
+    espn_db = st.session_state.get("data", {}).get("players", {})
+    if name in espn_db:
+        return espn_db[name].copy()
+    if last in espn_db:
+        return espn_db[last].copy()
+    # 2. Dictionnaire local codé en dur (fallback)
+    if name in PLAYERS:
+        return PLAYERS[name].copy()
+    if last in PLAYERS:
+        p = PLAYERS[last].copy()
+        if not p.get("first"):
+            p["first"] = " ".join(name.split()[:-1])
+        return p
+    # 3. Joueur inconnu
+    return {"first": " ".join(name.split()[:-1]), "country": "", "rank": 999}
 
 def player_label(name: str) -> str:
     p = player_info(name)
@@ -399,31 +400,68 @@ def fetch_draw_espn() -> tuple[list[tuple[str, str]], str]:
         return pairs, f"✅ {len(pairs)} matchs du 1er tour récupérés via ESPN"
     return [], "ESPN : aucun match du 1er tour trouvé"
 
-def fetch_atp_rankings_espn() -> dict[str, int]:
+# Conversion codes 3 lettres ESPN → ISO2 pour les drapeaux
+ESPN_ISO3_TO_ISO2 = {
+    "AFG":"AF","ALB":"AL","ALG":"DZ","AND":"AD","ANG":"AO","ARG":"AR","ARM":"AM",
+    "AUS":"AU","AUT":"AT","AZE":"AZ","BAH":"BS","BAN":"BD","BAR":"BB","BEL":"BE",
+    "BEN":"BJ","BER":"BM","BHU":"BT","BIH":"BA","BIZ":"BZ","BLR":"BY","BOL":"BO",
+    "BOT":"BW","BRA":"BR","BRN":"BH","BUL":"BG","BUR":"BF","CAM":"KH","CAN":"CA",
+    "CAY":"KY","CGO":"CG","CHI":"CL","CHN":"CN","CIV":"CI","CMR":"CM","COD":"CD",
+    "COL":"CO","COM":"KM","CPV":"CV","CRC":"CR","CRO":"HR","CUB":"CU","CYP":"CY",
+    "CZE":"CZ","DEN":"DK","DJI":"DJ","DOM":"DO","ECU":"EC","EGY":"EG","ESA":"SV",
+    "ESP":"ES","EST":"EE","ETH":"ET","FIJ":"FJ","FIN":"FI","FRA":"FR","GAB":"GA",
+    "GAM":"GM","GBR":"GB","GEO":"GE","GER":"DE","GHA":"GH","GRE":"GR","GRN":"GD",
+    "GUA":"GT","GUI":"GN","GUY":"GY","HAI":"HT","HKG":"HK","HON":"HN","HUN":"HU",
+    "INA":"ID","IND":"IN","IRI":"IR","IRL":"IE","IRQ":"IQ","ISL":"IS","ISR":"IL",
+    "ISV":"VI","ITA":"IT","IVB":"VG","JAM":"JM","JOR":"JO","JPN":"JP","KAZ":"KZ",
+    "KEN":"KE","KGZ":"KG","KOR":"KR","KSA":"SA","KUW":"KW","LAO":"LA","LAT":"LV",
+    "LBA":"LY","LBN":"LB","LES":"LS","LIB":"LB","LIE":"LI","LTU":"LT","LUX":"LU",
+    "MAC":"MO","MAD":"MG","MAR":"MA","MAS":"MY","MAW":"MW","MDA":"MD","MDV":"MV",
+    "MEX":"MX","MGL":"MN","MKD":"MK","MLI":"ML","MLT":"MT","MNE":"ME","MON":"MC",
+    "MOZ":"MZ","MRI":"MU","MTN":"MR","MYA":"MM","NAM":"NA","NCA":"NI","NED":"NL",
+    "NEP":"NP","NGR":"NG","NIG":"NE","NOR":"NO","NZL":"NZ","OMA":"OM","PAK":"PK",
+    "PAN":"PA","PAR":"PY","PER":"PE","PHI":"PH","PLE":"PS","PLW":"PW","PNG":"PG",
+    "POL":"PL","POR":"PT","PRK":"KP","PUR":"PR","QAT":"QA","ROU":"RO","RSA":"ZA",
+    "RUS":"RU","RWA":"RW","SAM":"WS","SEN":"SN","SEY":"SC","SKN":"KN","SLE":"SL",
+    "SLO":"SI","SMR":"SM","SOL":"SB","SOM":"SO","SRB":"RS","SRI":"LK","SUD":"SD",
+    "SUI":"CH","SUR":"SR","SVK":"SK","SWE":"SE","SWZ":"SZ","SYR":"SY","TAN":"TZ",
+    "TGA":"TO","THA":"TH","TJK":"TJ","TKM":"TM","TLS":"TL","TOG":"TG","TPE":"TW",
+    "TTO":"TT","TUN":"TN","TUR":"TR","UAE":"AE","UGA":"UG","UKR":"UA","URU":"UY",
+    "USA":"US","UZB":"UZ","VAN":"VU","VEN":"VE","VIE":"VN","VIN":"VC","YEM":"YE",
+    "ZAM":"ZM","ZIM":"ZW",
+}
+
+def fetch_player_db_espn() -> tuple[dict, str]:
     """
-    Récupère le classement ATP live depuis ESPN.
-    Retourne {nom_complet: rang, nom_de_famille: rang}.
+    Récupère la base joueurs complète depuis ESPN Rankings.
+    Retourne ({nom_complet: {first, last, country, rank}, ...}, message).
+    Les clés sont le nom complet ET le nom de famille pour la recherche.
     """
-    rankings: dict[str, int] = {}
+    players: dict = {}
     try:
         r = requests.get(ESPN_RANKINGS, headers=ESPN_HEADERS,
-                         params={"limit": 300}, timeout=10)
+                         params={"limit": 500}, timeout=12)
         if r.status_code != 200:
-            return rankings
+            return {}, f"ESPN Rankings : HTTP {r.status_code}"
         data = r.json()
         ranks_list = data.get("rankings", [{}])[0].get("ranks", [])
         for entry in ranks_list:
-            rank = entry.get("current", 0)
-            athlete = entry.get("athlete", {})
-            full = athlete.get("displayName", "").strip()
-            last = athlete.get("lastName", full.split()[-1] if full else "").strip()
-            if full and rank:
-                rankings[full] = rank
-                if last:
-                    rankings[last] = rank
-    except Exception:
-        pass
-    return rankings
+            rank  = entry.get("current", 0)
+            ath   = entry.get("athlete", {})
+            first = ath.get("firstName", "").strip()
+            last  = ath.get("lastName", "").strip()
+            full  = ath.get("displayName", f"{first} {last}").strip()
+            iso3  = ath.get("citizenshipCountry", "").upper()
+            iso2  = ESPN_ISO3_TO_ISO2.get(iso3, "")
+            if not full or not rank:
+                continue
+            entry_data = {"first": first, "last": last, "country": iso2, "rank": rank}
+            players[full] = entry_data
+            if last and last not in players:
+                players[last] = entry_data
+        return players, f"✅ {len([k for k in players if ' ' in k])} joueurs chargés depuis ESPN"
+    except Exception as e:
+        return {}, f"ESPN erreur : {e}"
 
 def parse_draw_text(text: str) -> list[tuple[str, str]]:
     """
@@ -671,17 +709,16 @@ with st.sidebar:
         else:
             st.warning(f"{msg}\n\nSaisissez le tableau manuellement ci-dessous.")
 
-    if st.button("📊 Fetch classements ATP"):
-        with st.spinner("Récupération classements ESPN..."):
-            rankings = fetch_atp_rankings_espn()
-        if rankings:
-            data["rankings"] = rankings
-            st.session_state["fetched_rankings"] = rankings
+    if st.button("📊 Fetch joueurs & classements ESPN"):
+        with st.spinner("Récupération joueurs ESPN..."):
+            players_db, msg = fetch_player_db_espn()
+        if players_db:
+            data["players"] = players_db
             save()
-            st.success(f"✅ {len(rankings)} classements sauvegardés et appliqués.")
+            st.success(msg)
             st.rerun()
         else:
-            st.warning("Classements non disponibles.")
+            st.warning(msg)
 
     preview = st.session_state.get("draw_preview", [])
     if preview:
@@ -692,13 +729,6 @@ with st.sidebar:
             st.caption(f"… et {len(preview)-5} autres matchs")
         if st.button("✅ Confirmer et reconstruire le 1er tour"):
             data["matchs"] = rebuild_premier_tour(data["matchs"], preview)
-            rankings = st.session_state.get("fetched_rankings", {})
-            if rankings:
-                for m in data["matchs"]:
-                    for name in [m["ja"], m["jb"]]:
-                        last = name.split()[-1]
-                        if last in rankings and name not in PLAYERS:
-                            PLAYERS[name] = {"first": "", "country": "", "rank": rankings[last]}
             del st.session_state["draw_preview"]
             save()
             st.rerun()
