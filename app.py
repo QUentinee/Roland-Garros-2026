@@ -642,6 +642,88 @@ def totaux(matchs, pw, pe, fm):
         t2 += calc_pts(m["p2w"], m["p2s"], m["rw"], m["rs"], pw, pe, m["tour"], fm, m["ja"], m["jb"])
     return t1, t2
 
+
+# ── Dates planifiées Roland-Garros 2026 (fallback par tour) ───────────────────
+ROUND_DATES = {
+    "1er tour":        "2026-05-25",
+    "2ème tour":       "2026-05-28",
+    "3ème tour":       "2026-05-30",
+    "8ème de finale":  "2026-06-02",
+    "Quart de finale": "2026-06-04",
+    "Demi-finale":     "2026-06-06",
+    "Finale":          "2026-06-08",
+}
+
+@st.cache_data(ttl=3600)
+def _espn_date_map() -> dict:
+    """Construit {clé_noms: date} depuis les groupings ESPN — mis en cache 1h."""
+    result = {}
+    try:
+        r = requests.get(ESPN_SCOREBOARD, headers=ESPN_HEADERS,
+                         params={"dates": "20260525", "limit": 200}, timeout=12)
+        if r.status_code != 200:
+            return result
+        events = r.json().get("events", [])
+        rg = next((e for e in events if e.get("id") == "172-2026"), None)
+        if not rg:
+            return result
+        mens = next((g for g in rg.get("groupings", [])
+                     if g.get("grouping", {}).get("slug") == "mens-singles"), None)
+        if not mens:
+            return result
+        for comp in mens.get("competitions", []):
+            date = (comp.get("date") or "")[:10]
+            if not date:
+                continue
+            names = [
+                c.get("athlete", {}).get("displayName", "").split()[-1].lower()
+                for c in comp.get("competitors", [])
+            ]
+            if len(names) >= 2 and all(names):
+                result[f"{names[0]}_{names[1]}"] = date
+                result[f"{names[1]}_{names[0]}"] = date
+    except Exception:
+        pass
+    return result
+
+def backfill_dates(matchs: list) -> tuple[list, bool]:
+    """
+    Pour chaque match sans date : ESPN par noms, puis ROUND_DATES par tour.
+    Retourne (matchs, changed).
+    """
+    if all(m.get("date") for m in matchs):
+        return matchs, False
+    date_map = _espn_date_map()
+    changed = False
+    for m in matchs:
+        if m.get("date"):
+            continue
+        key1 = match_key(m["ja"], m["jb"])
+        key2 = match_key(m["jb"], m["ja"])
+        espn_date = date_map.get(key1) or date_map.get(key2)
+        if espn_date:
+            m["date"] = espn_date
+        else:
+            tour = m.get("tour", "1er tour")
+            m["date"] = ROUND_DATES.get(tour, "")
+        changed = True
+    return matchs, changed
+
+# ── Helpers date ──────────────────────────────────────────────────────────────
+_MOIS_FR = ["","jan","fév","mars","avr","mai","juin","juil","août","sep","oct","nov","déc"]
+
+def fmt_date(d: str) -> str:
+    """'2026-05-25' → '25 mai' ; '' → ''"""
+    try:
+        parts = d[:10].split("-")
+        return f"{int(parts[2])} {_MOIS_FR[int(parts[1])]}"
+    except Exception:
+        return ""
+
+# ── Clé de tri par date ───────────────────────────────────────────────────────
+def _sort_key(m):
+    return (m.get("date") or "9999", m.get("tour", ""), m.get("id", 0))
+
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -803,86 +885,6 @@ with col_f1:
 with col_f2:
     status_filter = st.selectbox("Statut", ["Tous", "À pronostiquer", "Terminés"])
 
-# ── Dates planifiées Roland-Garros 2026 (fallback par tour) ───────────────────
-ROUND_DATES = {
-    "1er tour":        "2026-05-25",
-    "2ème tour":       "2026-05-28",
-    "3ème tour":       "2026-05-30",
-    "8ème de finale":  "2026-06-02",
-    "Quart de finale": "2026-06-04",
-    "Demi-finale":     "2026-06-06",
-    "Finale":          "2026-06-08",
-}
-
-@st.cache_data(ttl=3600)
-def _espn_date_map() -> dict:
-    """Construit {clé_noms: date} depuis les groupings ESPN — mis en cache 1h."""
-    result = {}
-    try:
-        r = requests.get(ESPN_SCOREBOARD, headers=ESPN_HEADERS,
-                         params={"dates": "20260525", "limit": 200}, timeout=12)
-        if r.status_code != 200:
-            return result
-        events = r.json().get("events", [])
-        rg = next((e for e in events if e.get("id") == "172-2026"), None)
-        if not rg:
-            return result
-        mens = next((g for g in rg.get("groupings", [])
-                     if g.get("grouping", {}).get("slug") == "mens-singles"), None)
-        if not mens:
-            return result
-        for comp in mens.get("competitions", []):
-            date = (comp.get("date") or "")[:10]
-            if not date:
-                continue
-            names = [
-                c.get("athlete", {}).get("displayName", "").split()[-1].lower()
-                for c in comp.get("competitors", [])
-            ]
-            if len(names) >= 2 and all(names):
-                result[f"{names[0]}_{names[1]}"] = date
-                result[f"{names[1]}_{names[0]}"] = date
-    except Exception:
-        pass
-    return result
-
-def backfill_dates(matchs: list) -> tuple[list, bool]:
-    """
-    Pour chaque match sans date : ESPN par noms, puis ROUND_DATES par tour.
-    Retourne (matchs, changed).
-    """
-    if all(m.get("date") for m in matchs):
-        return matchs, False
-    date_map = _espn_date_map()
-    changed = False
-    for m in matchs:
-        if m.get("date"):
-            continue
-        key1 = match_key(m["ja"], m["jb"])
-        key2 = match_key(m["jb"], m["ja"])
-        espn_date = date_map.get(key1) or date_map.get(key2)
-        if espn_date:
-            m["date"] = espn_date
-        else:
-            tour = m.get("tour", "1er tour")
-            m["date"] = ROUND_DATES.get(tour, "")
-        changed = True
-    return matchs, changed
-
-# ── Helpers date ──────────────────────────────────────────────────────────────
-_MOIS_FR = ["","jan","fév","mars","avr","mai","juin","juil","août","sep","oct","nov","déc"]
-
-def fmt_date(d: str) -> str:
-    """'2026-05-25' → '25 mai' ; '' → ''"""
-    try:
-        parts = d[:10].split("-")
-        return f"{int(parts[2])} {_MOIS_FR[int(parts[1])]}"
-    except Exception:
-        return ""
-
-# ── Matchs triés par date ─────────────────────────────────────────────────────
-def _sort_key(m):
-    return (m.get("date") or "9999", m.get("tour", ""), m.get("id", 0))
 
 matchs_affiches = [
     m for m in sorted(data["matchs"], key=_sort_key)
