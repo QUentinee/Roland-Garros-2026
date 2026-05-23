@@ -329,7 +329,9 @@ def fetch_results_espn() -> tuple[dict, str]:
                 except (ValueError, TypeError):
                     w_sets, l_sets = 0, 0
                 score = f"{w_sets}-{l_sets}"
-                entry = {"winner": w_name, "score": score, "source": "ESPN"}
+                # Date du match depuis ESPN (format YYYY-MM-DDThh:mmZ → YYYY-MM-DD)
+                match_date = (comp.get("date") or ev.get("date") or "")[:10]
+                entry = {"winner": w_name, "score": score, "source": "ESPN", "date": match_date}
                 key1 = f"{w_name.split()[-1].lower()}_{l_name.split()[-1].lower()}"
                 key2 = f"{l_name.split()[-1].lower()}_{w_name.split()[-1].lower()}"
                 results[key1] = entry
@@ -375,15 +377,14 @@ ESPN_HEADERS = {
 ESPN_SCOREBOARD = "https://site.web.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard"
 ESPN_RANKINGS   = "https://site.web.api.espn.com/apis/site/v2/sports/tennis/atp/rankings"
 
-def fetch_draw_espn() -> tuple[list[tuple[str, str]], str]:
+def fetch_draw_espn() -> tuple[list[tuple[str, str, str]], str]:
     """
     Récupère le tirage du 1er tour du tableau principal Roland-Garros 2026
     depuis l'API ESPN. 1er tour = matchs du 24-25 mai 2026 (period=1).
-    Retourne (liste de (nomA, nomB), message).
+    Retourne (liste de (nomA, nomB, date_YYYY-MM-DD), message).
     """
-    pairs: list[tuple[str, str]] = []
+    pairs: list[tuple[str, str, str]] = []
     try:
-        # Récupère les données du scoreboard au 25 mai (contient tout le tournoi)
         r = requests.get(ESPN_SCOREBOARD, headers=ESPN_HEADERS,
                          params={"dates": "20260525", "limit": 200}, timeout=12)
         if r.status_code != 200:
@@ -397,7 +398,6 @@ def fetch_draw_espn() -> tuple[list[tuple[str, str]], str]:
         mens = next((g for g in groupings if g.get("grouping", {}).get("slug") == "mens-singles"), None)
         if mens is None:
             return [], "ESPN : tableau hommes introuvable"
-        # 1er tour principal = period 1, dates 24 ou 25 mai 2026
         first_round_dates = {"2026-05-24", "2026-05-25"}
         for comp in mens.get("competitions", []):
             date = (comp.get("date") or "")[:10]
@@ -405,12 +405,11 @@ def fetch_draw_espn() -> tuple[list[tuple[str, str]], str]:
             if period == 1 and date in first_round_dates:
                 competitors = comp.get("competitors", [])
                 if len(competitors) >= 2:
-                    # order=2 = 1er dans l'affichage ESPN, order=1 = 2ème
                     sorted_comp = sorted(competitors, key=lambda c: c.get("order", 99))
                     name_a = sorted_comp[1].get("athlete", {}).get("displayName", "").strip()
                     name_b = sorted_comp[0].get("athlete", {}).get("displayName", "").strip()
                     if name_a and name_b:
-                        pairs.append((name_a, name_b))
+                        pairs.append((name_a, name_b, date))
     except Exception as e:
         return pairs, f"ESPN erreur : {e}"
     if pairs:
@@ -502,22 +501,25 @@ def parse_draw_text(text: str) -> list[tuple[str, str]]:
                 pairs.append((a, b))
     return pairs
 
-def rebuild_premier_tour(matchs: list, pairs: list[tuple[str, str]]) -> list:
+def rebuild_premier_tour(matchs: list, pairs: list) -> list:
     """
     Remplace TOUS les matchs du 1er tour par les nouvelles paires.
+    pairs peut être list[tuple[str,str]] ou list[tuple[str,str,str]] (avec date).
     Les autres tours sont conservés intacts.
-    Les matchs supprimés voient leurs pronostics perdus.
     """
     autres = [m for m in matchs if m.get("tour") != "1er tour"]
     max_id = max((m["id"] for m in matchs), default=0)
     nouveaux = []
-    for i, (ja, jb) in enumerate(pairs):
+    for entry in pairs:
+        ja, jb = entry[0], entry[1]
+        date = entry[2] if len(entry) > 2 else ""
         max_id += 1
         nouveaux.append({
             "id": max_id,
             "tour": "1er tour",
             "ja": ja,
             "jb": jb,
+            "date": date,
             "p1w": "", "p1s": "",
             "p2w": "", "p2s": "",
             "rw": "", "rs": "",
@@ -537,9 +539,11 @@ def auto_fill_results(matchs, espn_res, _ignored=None):
         key2 = match_key(m["jb"], m["ja"])
         res  = espn_res.get(key) or espn_res.get(key2)
         if res:
-            m["rw"] = res["winner"]
-            m["rs"] = res["score"]
+            m["rw"]     = res["winner"]
+            m["rs"]     = res["score"]
             m["source"] = res.get("source", "ESPN")
+            if res.get("date") and not m.get("date"):
+                m["date"] = res["date"]
             updated = True
     return matchs, updated
 
@@ -578,6 +582,7 @@ def generate_next_round(matchs: list) -> tuple[list, bool]:
                 "tour": next_r,
                 "ja": winners[i],
                 "jb": winners[i + 1],
+                "date": "",
                 "p1w": "", "p1s": "",
                 "p2w": "", "p2s": "",
                 "rw": "", "rs": "",
@@ -591,6 +596,7 @@ def generate_next_round(matchs: list) -> tuple[list, bool]:
                 "tour": next_r,
                 "ja": winners[-1],
                 "jb": "TBD",
+                "date": "",
                 "p1w": "", "p1s": "",
                 "p2w": "", "p2s": "",
                 "rw": "", "rs": "",
@@ -793,20 +799,36 @@ with col_f1:
 with col_f2:
     status_filter = st.selectbox("Statut", ["Tous", "À pronostiquer", "Terminés"])
 
-# ── Matchs ────────────────────────────────────────────────────────────────────
-for idx, m in enumerate(data["matchs"]):
-    if tour_filter != "Tous" and m.get("tour","1er tour") != tour_filter:
-        continue
-    if status_filter == "À pronostiquer" and m["rw"]:
-        continue
-    if status_filter == "Terminés" and not m["rw"]:
-        continue
+# ── Helpers date ──────────────────────────────────────────────────────────────
+_MOIS_FR = ["","jan","fév","mars","avr","mai","juin","juil","août","sep","oct","nov","déc"]
 
+def fmt_date(d: str) -> str:
+    """'2026-05-25' → '25 mai' ; '' → ''"""
+    try:
+        parts = d[:10].split("-")
+        return f"{int(parts[2])} {_MOIS_FR[int(parts[1])]}"
+    except Exception:
+        return ""
+
+# ── Matchs triés par date ─────────────────────────────────────────────────────
+def _sort_key(m):
+    return (m.get("date") or "9999", m.get("tour", ""), m.get("id", 0))
+
+matchs_affiches = [
+    m for m in sorted(data["matchs"], key=_sort_key)
+    if (tour_filter == "Tous" or m.get("tour","1er tour") == tour_filter)
+    and (status_filter != "À pronostiquer" or not m["rw"])
+    and (status_filter != "Terminés" or m["rw"])
+]
+
+for idx, m in enumerate(matchs_affiches):
     ja, jb = m["ja"], m["jb"]
     la, lb = player_label(ja), player_label(jb)
     src_badge = f'<span class="auto-badge">auto {m.get("source","")}</span>' if m.get("source") else ""
     result_str = f"✅ {m['rw']} {m['rs']}" if m["rw"] else "⏳ en attente"
-    label = f"{la}  vs  {lb}  —  _{m.get('tour','1er tour')}_  —  {result_str}"
+    date_str = fmt_date(m.get("date",""))
+    date_part = f"  📅 {date_str}  —" if date_str else ""
+    label = f"{la}  vs  {lb}  —{date_part}  _{m.get('tour','1er tour')}_  —  {result_str}"
 
     with st.expander(label, expanded=False):
         cp1, cp2, cr = st.columns(3)
