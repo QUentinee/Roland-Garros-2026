@@ -34,7 +34,7 @@ PLAYERS = {
     "Tiafoe":            {"first": "Frances",       "country": "US", "rank": 23},
     "Griekspoor":        {"first": "Tallon",        "country": "NL", "rank": 36},
     "Arnaldi":           {"first": "Matteo",        "country": "IT", "rank": 46},
-    "Muller A.":         {"first": "Alexandre",     "country": "FR", "rank": 41},
+    "Muller":         {"first": "Alexandre",     "country": "FR", "rank": 41},
     "Tsitsipas":         {"first": "Stefanos",      "country": "GR", "rank": 12},
     "Collignon":         {"first": "Raphael",       "country": "BE", "rank": 88},
     "Vukic":             {"first": "Aleksandar",    "country": "AU", "rank": 71},
@@ -51,11 +51,11 @@ PLAYERS = {
     "Norrie":            {"first": "Cameron",       "country": "GB", "rank": 67},
     "Vallejo":           {"first": "Daniel",        "country": "PY", "rank": 185},
     "Cilic":             {"first": "Marin",         "country": "HR", "rank": 95},
-    "Kouame":            {"first": "Eliakim",       "country": "FR", "rank": 180},
+    "Kouame":            {"first": "Moise",       "country": "FR", "rank": 313},
     "Tabilo":            {"first": "Alejandro",     "country": "CL", "rank": 33},
     "Majchrzak":         {"first": "Kamil",         "country": "PL", "rank": 78},
     "Faurel":            {"first": "Hugo",          "country": "FR", "rank": 310},
-    "Vacherot":          {"first": "Valentin",      "country": "MC", "rank": 40},
+    "Vacherot":          {"first": "Valentin",      "country": "MC", "rank": 18},
     "Cobolli":           {"first": "Flavio",        "country": "IT", "rank": 19},
     "Pellegrino":        {"first": "Andrea",        "country": "IT", "rank": 158},
     "Wu Yibing":         {"first": "Yibing",        "country": "CN", "rank": 152},
@@ -334,6 +334,65 @@ def fetch_livescore_scrape():
     except Exception:
         return {}
 
+# ── Fetch tableau officiel Roland-Garros ──────────────────────────────────────
+def fetch_rg_draw() -> tuple[list[tuple[str, str]], str]:
+    """
+    Tente de récupérer les paires de joueurs du 1er tour depuis plusieurs sources.
+    Retourne (liste de (joueurA, joueurB), message_status).
+    """
+    import re
+    UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    sources = [
+        ("Flashscore",  "https://www.flashscore.com/tennis/roland-garros-2026/"),
+        ("ATP Tour",    "https://www.atptour.com/en/scores/archive/roland-garros/520/2026/draws"),
+        ("RG officiel", "https://www.rolandgarros.com/en-us/draws"),
+    ]
+    pairs: list[tuple[str, str]] = []
+    for name, url in sources:
+        try:
+            r = requests.get(url, headers={"User-Agent": UA, "Accept-Language": "fr-FR,fr;q=0.9"}, timeout=10)
+            if r.status_code != 200:
+                continue
+            text = r.text
+            # Pattern générique : cherche des paires "Nom vs Nom" ou "Nom - Nom"
+            found = re.findall(
+                r'([A-Z][a-záàâäéèêëîïôöùûüç\'.\- ]{2,25})\s*(?:vs\.?|-)\s*([A-Z][a-záàâäéèêëîïôöùûüç\'.\- ]{2,25})',
+                text
+            )
+            # filtre les faux-positifs courts
+            found = [(a.strip(), b.strip()) for a, b in found if len(a) > 3 and len(b) > 3]
+            if len(found) >= 10:
+                pairs = found
+                return pairs, f"✅ {len(pairs)} paires trouvées via {name}"
+        except Exception:
+            continue
+    return [], "❌ Aucune source n'a pu être lue (sites anti-scraping ou format inconnu)"
+
+def apply_draw_to_matchs(matchs: list, pairs: list[tuple[str, str]]) -> tuple[list, int]:
+    """
+    Pour les matchs dont ja ou jb contient 'Q', 'TBD' ou est vide,
+    tente de les remplacer avec les données du tableau récupéré.
+    Retourne (matchs mis à jour, nombre de remplacements).
+    """
+    placeholders = {"q", "tbd", "", "qualifié", "qualifier"}
+    replaced = 0
+    pair_idx = 0
+    for m in matchs:
+        if pair_idx >= len(pairs):
+            break
+        ja_low = m["ja"].strip().lower()
+        jb_low = m["jb"].strip().lower()
+        needs_update = ja_low in placeholders or jb_low in placeholders
+        if needs_update:
+            new_a, new_b = pairs[pair_idx]
+            if ja_low in placeholders:
+                m["ja"] = new_a
+            if jb_low in placeholders:
+                m["jb"] = new_b
+            replaced += 1
+            pair_idx += 1
+    return matchs, replaced
+
 def match_key(ja, jb):
     return f"{ja.split()[-1].lower()}_{jb.split()[-1].lower()}"
 
@@ -351,6 +410,62 @@ def auto_fill_results(matchs, atp_res, ls_res):
             m["source"] = res["source"]
             updated = True
     return matchs, updated
+
+# ── Progression automatique du tableau ───────────────────────────────────────
+def next_round(current_round: str) -> str | None:
+    idx = ROUNDS.index(current_round) if current_round in ROUNDS else -1
+    if idx == -1 or idx >= len(ROUNDS) - 1:
+        return None
+    return ROUNDS[idx + 1]
+
+def generate_next_round(matchs: list) -> tuple[list, bool]:
+    """
+    Pour chaque tour, si tous les matchs sont terminés (rw rempli) et que le tour
+    suivant n'existe pas encore, crée les matchs du tour suivant en appariant les
+    vainqueurs par paires consécutives (match 1 gagnant vs match 2 gagnant, etc.).
+    Retourne (matchs mis à jour, True si des matchs ont été ajoutés).
+    """
+    added = False
+    for round_name in ROUNDS[:-1]:
+        round_matchs = [m for m in matchs if m.get("tour") == round_name]
+        if not round_matchs:
+            continue
+        if any(not m["rw"] for m in round_matchs):
+            continue
+        next_r = next_round(round_name)
+        if not next_r:
+            continue
+        if any(m.get("tour") == next_r for m in matchs):
+            continue
+        winners = [m["rw"] for m in round_matchs]
+        max_id = max((m["id"] for m in matchs), default=0)
+        for i in range(0, len(winners) - 1, 2):
+            max_id += 1
+            matchs.append({
+                "id": max_id,
+                "tour": next_r,
+                "ja": winners[i],
+                "jb": winners[i + 1],
+                "p1w": "", "p1s": "",
+                "p2w": "", "p2s": "",
+                "rw": "", "rs": "",
+                "source": "",
+            })
+            added = True
+        if len(winners) % 2 == 1:
+            max_id += 1
+            matchs.append({
+                "id": max_id,
+                "tour": next_r,
+                "ja": winners[-1],
+                "jb": "TBD",
+                "p1w": "", "p1s": "",
+                "p2w": "", "p2s": "",
+                "rw": "", "rs": "",
+                "source": "",
+            })
+            added = True
+    return matchs, added
 
 # ── Bonus underdog ────────────────────────────────────────────────────────────
 def underdog_multiplier(pred_winner: str, ja: str, jb: str) -> int:
@@ -416,7 +531,11 @@ if "data" not in st.session_state:
 data = st.session_state["data"]
 
 def save():
-    st.session_state["sha"] = gh_save(st.session_state["data"], st.session_state["sha"])
+    data = st.session_state["data"]
+    data["matchs"], added = generate_next_round(data["matchs"])
+    if added:
+        st.toast("🎾 Nouveaux matchs générés pour le tour suivant !", icon="🎉")
+    st.session_state["sha"] = gh_save(data, st.session_state["sha"])
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown('<p class="main-title">🎾 Paris Roland-Garros 2026</p>', unsafe_allow_html=True)
@@ -461,6 +580,20 @@ with st.sidebar:
         else:
             st.info("Aucun nouveau résultat trouvé.")
         st.rerun()
+
+    st.divider()
+    st.subheader("🎾 Tableau officiel")
+    st.caption("Remplace automatiquement les cases 'Q' / 'TBD' par les vrais noms.")
+    if st.button("🔍 Fetch tableau Roland-Garros"):
+        with st.spinner("Récupération du tableau en ligne..."):
+            pairs, status_msg = fetch_rg_draw()
+        if pairs:
+            data["matchs"], nb_replaced = apply_draw_to_matchs(data["matchs"], pairs)
+            save()
+            st.success(f"{status_msg}\n{nb_replaced} joueur(s) mis à jour.")
+            st.rerun()
+        else:
+            st.warning(status_msg)
 
     st.divider()
     st.subheader("Ajouter un match")
@@ -567,6 +700,28 @@ for idx, m in enumerate(data["matchs"]):
 
         if changed:
             save(); st.rerun()
+
+        # ── Édition manuelle des noms ──────────────────────────────────────
+        with st.expander("✏️ Modifier les noms des joueurs de ce match"):
+            with st.form(key=f"edit_players_{m['id']}"):
+                col_ea, col_eb = st.columns(2)
+                with col_ea:
+                    new_ja = st.text_input("Joueur A", value=m["ja"])
+                with col_eb:
+                    new_jb = st.text_input("Joueur B", value=m["jb"])
+                if st.form_submit_button("✅ Appliquer"):
+                    if new_ja != m["ja"] or new_jb != m["jb"]:
+                        # Réinitialise les pronostics si le nom change
+                        if m["p1w"] == m["ja"]: m["p1w"] = new_ja
+                        if m["p1w"] == m["jb"]: m["p1w"] = new_jb
+                        if m["p2w"] == m["ja"]: m["p2w"] = new_ja
+                        if m["p2w"] == m["jb"]: m["p2w"] = new_jb
+                        if m["rw"]  == m["ja"]: m["rw"]  = new_ja
+                        if m["rw"]  == m["jb"]: m["rw"]  = new_jb
+                        m["ja"] = new_ja
+                        m["jb"] = new_jb
+                        save()
+                        st.rerun()
 
 st.divider()
 st.caption(f"Roland-Garros 2026 · {len(data['matchs'])} matchs · données GitHub · fetch auto ATP+livescore · bonus underdog ×2/×3")
