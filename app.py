@@ -144,7 +144,15 @@ def flag(country_iso2: str) -> str:
            chr(0x1F1E6 + ord(country_iso2[1].upper()) - ord("A"))
 
 def player_info(name: str):
-    p = PLAYERS.get(name, {"first": "", "country": "", "rank": 999}).copy()
+    # Cherche d'abord par nom exact, sinon par nom de famille (dernier mot)
+    if name in PLAYERS:
+        p = PLAYERS[name].copy()
+    else:
+        last = name.split()[-1]
+        p = PLAYERS.get(last, {"first": "", "country": "", "rank": 999}).copy()
+        # Si trouvé par nom de famille, garde le prénom complet d'ESPN
+        if last in PLAYERS and not p.get("first"):
+            p["first"] = " ".join(name.split()[:-1])
     # Classements fetchés depuis ESPN, stockés dans data["rankings"]
     fetched = st.session_state.get("data", {}).get("rankings", {})
     last = name.split()[-1]
