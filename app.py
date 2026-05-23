@@ -286,48 +286,61 @@ def gh_save(data, sha):
     return r.json()["content"]["sha"]
 
 # ── Fetch résultats ATP (RapidAPI) ────────────────────────────────────────────
-def fetch_atp_results():
+def fetch_results_espn() -> tuple[dict, str]:
+    """
+    Récupère les résultats terminés de Roland-Garros 2026 depuis ESPN.
+    Parcourt toutes les dates du tournoi (25 mai – 8 juin 2026).
+    Retourne ({clé: {winner, score, source}}, message).
+    La clé = "nomA_nomB" (noms de famille en minuscules).
+    Le score = "sets_gagnés_vainqueur-sets_gagnés_perdant".
+    """
+    import datetime as dt
+    results: dict = {}
     try:
-        if "rapidapi_key" not in st.secrets:
-            return {}
-        url = "https://api-tennis.p.rapidapi.com/tennis/"
-        params = {"method": "get_H2H", "event_id": "roland-garros-2026"}
-        headers = {
-            "X-RapidAPI-Key": st.secrets["rapidapi_key"],
-            "X-RapidAPI-Host": "api-tennis.p.rapidapi.com"
-        }
-        r = requests.get(url, headers=headers, params=params, timeout=5)
-        if r.status_code != 200:
-            return {}
-        data = r.json()
-        results = {}
-        for match in data.get("result", []):
-            try:
-                p1 = match.get("event_first_player", "")
-                p2 = match.get("event_second_player", "")
-                score_str = match.get("event_final_result", "")
-                if not p1 or not p2 or not score_str:
-                    continue
-                sets1, sets2 = 0, 0
-                for part in score_str.split(","):
-                    part = part.strip()
-                    if "-" in part:
-                        a, b = part.split("-")[0], part.split("-")[1].split("(")[0]
-                        if int(a) > int(b):
-                            sets1 += 1
-                        else:
-                            sets2 += 1
-                score_fmt = f"{max(sets1,sets2)}-{min(sets1,sets2)}"
-                w = p1 if sets1 > sets2 else p2
-                key = f"{p1.split()[-1].lower()}_{p2.split()[-1].lower()}"
-                results[key] = {"winner": w, "score": score_fmt, "source": "ATP"}
-            except Exception:
+        today = dt.date.today()
+        start = dt.date(2026, 5, 25)
+        end   = dt.date(2026, 6, 8)
+        cur   = start
+        while cur <= min(today, end):
+            date_str = cur.strftime("%Y%m%d")
+            cur += dt.timedelta(days=1)
+            r = requests.get(ESPN_SCOREBOARD, headers=ESPN_HEADERS,
+                             params={"dates": date_str, "limit": 200}, timeout=10)
+            if r.status_code != 200:
                 continue
-        return results
-    except Exception:
-        return {}
+            for ev in r.json().get("events", []):
+                if not ev.get("id", "").startswith("172-"):
+                    continue
+                comp = ev.get("competitions", [{}])[0]
+                if not comp.get("status", {}).get("type", {}).get("completed"):
+                    continue
+                competitors = comp.get("competitors", [])
+                if len(competitors) < 2:
+                    continue
+                winner_c = next((c for c in competitors if c.get("winner")), None)
+                loser_c  = next((c for c in competitors if not c.get("winner")), None)
+                if not winner_c or not loser_c:
+                    continue
+                w_name = winner_c.get("athlete", {}).get("displayName", "")
+                l_name = loser_c.get("athlete",  {}).get("displayName", "")
+                try:
+                    w_sets = int(float(winner_c.get("score", 0)))
+                    l_sets = int(float(loser_c.get("score",  0)))
+                except (ValueError, TypeError):
+                    w_sets, l_sets = 0, 0
+                score = f"{w_sets}-{l_sets}"
+                entry = {"winner": w_name, "score": score, "source": "ESPN"}
+                key1 = f"{w_name.split()[-1].lower()}_{l_name.split()[-1].lower()}"
+                key2 = f"{l_name.split()[-1].lower()}_{w_name.split()[-1].lower()}"
+                results[key1] = entry
+                results[key2] = entry
+        msg = f"✅ {len(results)//2} résultats récupérés (ESPN)" if results else "Aucun résultat ESPN (tournoi pas encore commencé ?)"
+        return results, msg
+    except Exception as e:
+        return {}, f"ESPN résultats erreur : {e}"
 
 def fetch_livescore_scrape():
+    # Conservé pour compatibilité — livescore redirige en 404, retourne vide
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -515,18 +528,18 @@ def rebuild_premier_tour(matchs: list, pairs: list[tuple[str, str]]) -> list:
 def match_key(ja, jb):
     return f"{ja.split()[-1].lower()}_{jb.split()[-1].lower()}"
 
-def auto_fill_results(matchs, atp_res, ls_res):
+def auto_fill_results(matchs, espn_res, _ignored=None):
     updated = False
     for m in matchs:
         if m["rw"]:
             continue
         key  = match_key(m["ja"], m["jb"])
         key2 = match_key(m["jb"], m["ja"])
-        res  = atp_res.get(key) or atp_res.get(key2) or ls_res.get(key) or ls_res.get(key2)
+        res  = espn_res.get(key) or espn_res.get(key2)
         if res:
             m["rw"] = res["winner"]
             m["rs"] = res["score"]
-            m["source"] = res["source"]
+            m["source"] = res.get("source", "ESPN")
             updated = True
     return matchs, updated
 
@@ -687,17 +700,15 @@ with st.sidebar:
     last = data.get("last_fetch","jamais")
     st.caption(f"Dernier fetch : {last}")
     if st.button("🔄 Fetch résultats maintenant"):
-        with st.spinner("Récupération ATP..."):
-            atp = fetch_atp_results()
-        with st.spinner("Fallback livescore..."):
-            ls  = fetch_livescore_scrape()
-        data["matchs"], updated = auto_fill_results(data["matchs"], atp, ls)
+        with st.spinner("Récupération résultats ESPN..."):
+            espn, msg = fetch_results_espn()
+        data["matchs"], updated = auto_fill_results(data["matchs"], espn)
         data["last_fetch"] = datetime.now().strftime("%d/%m %H:%M")
         save()
         if updated:
-            st.success(f"Résultats mis à jour ! (ATP:{len(atp)} | LS:{len(ls)})")
+            st.success(msg)
         else:
-            st.info("Aucun nouveau résultat trouvé.")
+            st.info(msg)
         st.rerun()
 
     st.divider()
