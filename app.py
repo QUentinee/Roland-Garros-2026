@@ -168,7 +168,11 @@ def player_label(name: str) -> str:
     first = p["first"]
     rank = p["rank"]
     rank_str = f"#{rank}" if rank and rank < 999 else "NC"
-    full = f"{first} {name}".strip()
+    # Si le prénom est déjà dans name (nom complet ESPN), ne pas le redoubler
+    if first and not name.startswith(first):
+        full = f"{first} {name}".strip()
+    else:
+        full = name
     return f"{fl} {full} ({rank_str})"
 
 # ── Tous les matchs du 1er tour depuis le PDF ─────────────────────────────────
