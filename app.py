@@ -749,8 +749,10 @@ if "data" not in st.session_state:
     st.session_state["sha"]  = sha
     # Peuple les dates manquantes (ESPN + calendrier fixe) et persiste sur GitHub
     data["matchs"], dates_changed = backfill_dates(data["matchs"])
-    if dates_changed:
-        st.session_state["sha"] = gh_save(data, sha)
+    # Génère les tours suivants si tous les matchs d'un tour sont terminés
+    data["matchs"], rounds_added = generate_next_round(data["matchs"])
+    if dates_changed or rounds_added:
+        st.session_state["sha"] = gh_save(data, st.session_state["sha"])
 
 data = st.session_state["data"]
 
