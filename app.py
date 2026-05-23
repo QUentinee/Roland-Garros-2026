@@ -334,88 +334,79 @@ def fetch_livescore_scrape():
     except Exception:
         return {}
 
-# ── Fetch tableau & classements depuis SofaScore ─────────────────────────────
-SOFASCORE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-    "Accept": "application/json",
-    "Referer": "https://www.sofascore.com/",
+# ── Fetch tableau & classements depuis ESPN (API publique) ────────────────────
+ESPN_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
 }
+ESPN_SCOREBOARD = "https://site.web.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard"
+ESPN_RANKINGS   = "https://site.web.api.espn.com/apis/site/v2/sports/tennis/atp/rankings"
 
-def _sofascore_rg_season_id() -> int | None:
-    """Cherche l'ID de saison Roland-Garros 2026 sur SofaScore (tournament 2981 = RG hommes)."""
-    try:
-        r = requests.get(
-            "https://api.sofascore.com/api/v1/unique-tournament/2981/seasons",
-            headers=SOFASCORE_HEADERS, timeout=8
-        )
-        if r.status_code != 200:
-            return None
-        for s in r.json().get("seasons", []):
-            if "2026" in s.get("name", ""):
-                return s["id"]
-    except Exception:
-        pass
-    return None
-
-def fetch_draw_sofascore() -> tuple[list[tuple[str, str]], str]:
+def fetch_draw_espn() -> tuple[list[tuple[str, str]], str]:
     """
-    Récupère le tableau du 1er tour depuis l'API SofaScore.
-    Retourne (liste de (nomA, nomB) par ordre de match, message).
+    Récupère le tirage du 1er tour du tableau principal Roland-Garros 2026
+    depuis l'API ESPN. 1er tour = matchs du 24-25 mai 2026 (period=1).
+    Retourne (liste de (nomA, nomB), message).
     """
-    season_id = _sofascore_rg_season_id()
-    if season_id is None:
-        return [], "SofaScore : saison 2026 non trouvée"
     pairs: list[tuple[str, str]] = []
     try:
-        page = 0
-        while True:
-            r = requests.get(
-                f"https://api.sofascore.com/api/v1/unique-tournament/2981/season/{season_id}/events/last/{page}",
-                headers=SOFASCORE_HEADERS, timeout=8
-            )
-            if r.status_code != 200:
-                break
-            events = r.json().get("events", [])
-            if not events:
-                break
-            for ev in events:
-                ri = ev.get("roundInfo", {})
-                if ri.get("round") == 1:
-                    home = ev.get("homeTeam", {}).get("name", "").strip()
-                    away = ev.get("awayTeam", {}).get("name", "").strip()
-                    if home and away:
-                        pairs.append((home, away))
-            page += 1
-            if page > 5:
-                break
+        # Récupère les données du scoreboard au 25 mai (contient tout le tournoi)
+        r = requests.get(ESPN_SCOREBOARD, headers=ESPN_HEADERS,
+                         params={"dates": "20260525", "limit": 200}, timeout=12)
+        if r.status_code != 200:
+            return [], f"ESPN : HTTP {r.status_code}"
+        data = r.json()
+        events = data.get("events", [])
+        rg = next((e for e in events if e.get("id") == "172-2026"), None)
+        if rg is None:
+            return [], "ESPN : événement Roland-Garros 2026 introuvable"
+        groupings = rg.get("groupings", [])
+        mens = next((g for g in groupings if g.get("grouping", {}).get("slug") == "mens-singles"), None)
+        if mens is None:
+            return [], "ESPN : tableau hommes introuvable"
+        # 1er tour principal = period 1, dates 24 ou 25 mai 2026
+        first_round_dates = {"2026-05-24", "2026-05-25"}
+        for comp in mens.get("competitions", []):
+            date = (comp.get("date") or "")[:10]
+            period = comp.get("status", {}).get("period")
+            if period == 1 and date in first_round_dates:
+                competitors = comp.get("competitors", [])
+                if len(competitors) >= 2:
+                    # order=2 = 1er dans l'affichage ESPN, order=1 = 2ème
+                    sorted_comp = sorted(competitors, key=lambda c: c.get("order", 99))
+                    name_a = sorted_comp[1].get("athlete", {}).get("displayName", "").strip()
+                    name_b = sorted_comp[0].get("athlete", {}).get("displayName", "").strip()
+                    if name_a and name_b:
+                        pairs.append((name_a, name_b))
     except Exception as e:
-        return pairs, f"Erreur SofaScore : {e}"
+        return pairs, f"ESPN erreur : {e}"
     if pairs:
-        return pairs, f"✅ {len(pairs)} matchs récupérés via SofaScore"
-    return [], "SofaScore : aucun match du 1er tour trouvé"
+        return pairs, f"✅ {len(pairs)} matchs du 1er tour récupérés via ESPN"
+    return [], "ESPN : aucun match du 1er tour trouvé"
 
-def fetch_atp_rankings_sofascore() -> dict[str, int]:
+def fetch_atp_rankings_espn() -> dict[str, int]:
     """
-    Récupère le classement ATP depuis SofaScore.
-    Retourne {nom_joueur: rang}.
+    Récupère le classement ATP live depuis ESPN.
+    Retourne {nom_complet: rang, nom_de_famille: rang}.
     """
     rankings: dict[str, int] = {}
     try:
-        r = requests.get(
-            "https://api.sofascore.com/api/v1/rankings/type/15",
-            headers=SOFASCORE_HEADERS, timeout=10
-        )
+        r = requests.get(ESPN_RANKINGS, headers=ESPN_HEADERS,
+                         params={"limit": 300}, timeout=10)
         if r.status_code != 200:
             return rankings
-        rows = r.json().get("rankings", [])
-        for row in rows:
-            name = row.get("team", {}).get("name", "").strip()
-            rank = row.get("ranking", 0)
-            if name and rank:
-                # Stocke aussi juste le nom de famille (dernier mot)
-                last = name.split()[-1]
-                rankings[last] = rank
-                rankings[name] = rank
+        data = r.json()
+        ranks_list = data.get("rankings", [{}])[0].get("ranks", [])
+        for entry in ranks_list:
+            rank = entry.get("current", 0)
+            athlete = entry.get("athlete", {})
+            full = athlete.get("displayName", "").strip()
+            last = athlete.get("lastName", full.split()[-1] if full else "").strip()
+            if full and rank:
+                rankings[full] = rank
+                if last:
+                    rankings[last] = rank
     except Exception:
         pass
     return rankings
@@ -657,9 +648,9 @@ with st.sidebar:
     st.subheader("🏗️ Reconstruire le tableau")
     st.caption("Repart de zéro pour le 1er tour — les pronostics déjà saisis seront perdus.")
 
-    if st.button("🔍 Fetch auto via SofaScore"):
-        with st.spinner("Connexion à SofaScore..."):
-            pairs, msg = fetch_draw_sofascore()
+    if st.button("🔍 Fetch auto via ESPN"):
+        with st.spinner("Connexion à ESPN..."):
+            pairs, msg = fetch_draw_espn()
         if pairs:
             st.session_state["draw_preview"] = pairs
             st.success(f"{msg} — vérifiez ci-dessous puis confirmez.")
@@ -668,7 +659,7 @@ with st.sidebar:
 
     if st.button("📊 Fetch classements ATP"):
         with st.spinner("Récupération classements..."):
-            rankings = fetch_atp_rankings_sofascore()
+            rankings = fetch_atp_rankings_espn()
         if rankings:
             st.session_state["fetched_rankings"] = rankings
             st.success(f"✅ {len(rankings)} joueurs mis à jour.")
