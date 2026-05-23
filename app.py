@@ -7,9 +7,157 @@ import time
 
 st.set_page_config(page_title="Paris Roland-Garros 2026", page_icon="🎾", layout="wide")
 
+# ── Base joueurs : prénom, pays (ISO2), classement ATP ────────────────────────
+# Clé = nom tel qu'utilisé dans les matchs. Édite librement les classements.
+PLAYERS = {
+    "Sinner":            {"first": "Jannik",        "country": "IT", "rank": 1},
+    "Tabur":             {"first": "Arthur",        "country": "FR", "rank": 280},
+    "Fearnley":          {"first": "Jacob",         "country": "GB", "rank": 52},
+    "Cerundolo J.M.":    {"first": "Juan Manuel",   "country": "AR", "rank": 95},
+    "Landaluce":         {"first": "Martin",        "country": "ES", "rank": 140},
+    "Kopriva":           {"first": "Vit",           "country": "CZ", "rank": 105},
+    "Moutet":            {"first": "Corentin",      "country": "FR", "rank": 68},
+    "Rinderknech":       {"first": "Arthur",        "country": "FR", "rank": 58},
+    "Rodionov":          {"first": "Jurij",         "country": "AT", "rank": 155},
+    "Fucsovics":         {"first": "Marton",        "country": "HU", "rank": 92},
+    "Berrettini":        {"first": "Matteo",        "country": "IT", "rank": 32},
+    "Quinn":             {"first": "Ethan",         "country": "US", "rank": 125},
+    "Comesana":          {"first": "Francisco",     "country": "AR", "rank": 72},
+    "Ofner":             {"first": "Sebastian",     "country": "AT", "rank": 105},
+    "Darderi":           {"first": "Luciano",       "country": "IT", "rank": 38},
+    "Bublik":            {"first": "Alexander",     "country": "KZ", "rank": 24},
+    "Struff":            {"first": "Jan-Lennard",   "country": "DE", "rank": 54},
+    "Shapovalov":        {"first": "Denis",         "country": "CA", "rank": 29},
+    "Munar":             {"first": "Jaume",         "country": "ES", "rank": 49},
+    "Hurkacz":           {"first": "Hubert",        "country": "PL", "rank": 21},
+    "Spizzirri":         {"first": "Eliot",         "country": "US", "rank": 82},
+    "Tiafoe":            {"first": "Frances",       "country": "US", "rank": 23},
+    "Griekspoor":        {"first": "Tallon",        "country": "NL", "rank": 36},
+    "Arnaldi":           {"first": "Matteo",        "country": "IT", "rank": 46},
+    "Muller A.":         {"first": "Alexandre",     "country": "FR", "rank": 41},
+    "Tsitsipas":         {"first": "Stefanos",      "country": "GR", "rank": 12},
+    "Collignon":         {"first": "Raphael",       "country": "BE", "rank": 88},
+    "Vukic":             {"first": "Aleksandar",    "country": "AU", "rank": 71},
+    "Merida":            {"first": "Daniel",        "country": "ES", "rank": 195},
+    "Shelton":           {"first": "Ben",           "country": "US", "rank": 6},
+    "Auger-Aliassime":   {"first": "Felix",         "country": "CA", "rank": 10},
+    "Altmaier":          {"first": "Daniel",        "country": "DE", "rank": 55},
+    "Baez":              {"first": "Sebastian",     "country": "AR", "rank": 37},
+    "Burruchaga":        {"first": "Roman Andres",  "country": "AR", "rank": 112},
+    "Van Assche":        {"first": "Luca",          "country": "FR", "rank": 120},
+    "Kypson":            {"first": "Patrick",       "country": "US", "rank": 145},
+    "Bautista Agut":     {"first": "Roberto",       "country": "ES", "rank": 65},
+    "Nakashima":         {"first": "Brandon",       "country": "US", "rank": 31},
+    "Norrie":            {"first": "Cameron",       "country": "GB", "rank": 67},
+    "Vallejo":           {"first": "Daniel",        "country": "PY", "rank": 185},
+    "Cilic":             {"first": "Marin",         "country": "HR", "rank": 95},
+    "Kouame":            {"first": "Eliakim",       "country": "FR", "rank": 180},
+    "Tabilo":            {"first": "Alejandro",     "country": "CL", "rank": 33},
+    "Majchrzak":         {"first": "Kamil",         "country": "PL", "rank": 78},
+    "Faurel":            {"first": "Hugo",          "country": "FR", "rank": 310},
+    "Vacherot":          {"first": "Valentin",      "country": "MC", "rank": 40},
+    "Cobolli":           {"first": "Flavio",        "country": "IT", "rank": 19},
+    "Pellegrino":        {"first": "Andrea",        "country": "IT", "rank": 158},
+    "Wu Yibing":         {"first": "Yibing",        "country": "CN", "rank": 152},
+    "Giron":             {"first": "Marcos",        "country": "US", "rank": 51},
+    "Diaz Acosta":       {"first": "Facundo",       "country": "AR", "rank": 84},
+    "Zhang Z.":          {"first": "Zhizhen",       "country": "CN", "rank": 73},
+    "Garin":             {"first": "Cristian",      "country": "CL", "rank": 102},
+    "Tien":              {"first": "Learner",       "country": "US", "rank": 34},
+    "Cerundolo F.":      {"first": "Francisco",     "country": "AR", "rank": 22},
+    "Van de Zandschulp": {"first": "Botic",         "country": "NL", "rank": 80},
+    "Gaston":            {"first": "Hugo",          "country": "FR", "rank": 99},
+    "Monfils":           {"first": "Gael",          "country": "FR", "rank": 48},
+    "Popyrin":           {"first": "Alexei",        "country": "AU", "rank": 28},
+    "Svajda":            {"first": "Zachary",       "country": "US", "rank": 115},
+    "Walton":            {"first": "Adam",          "country": "AU", "rank": 86},
+    "Medvedev":          {"first": "Daniil",        "country": "RU", "rank": 13},
+    "De Minaur":         {"first": "Alex",          "country": "AU", "rank": 7},
+    "Samuel":            {"first": "Ethan",         "country": "AU", "rank": 260},
+    "Blockx":            {"first": "Alexander",     "country": "BE", "rank": 104},
+    "Navone":            {"first": "Mariano",       "country": "AR", "rank": 74},
+    "Brooksby":          {"first": "Jenson",        "country": "US", "rank": 83},
+    "Droguet":           {"first": "Titouan",       "country": "FR", "rank": 210},
+    "Mensik":            {"first": "Jakub",         "country": "CZ", "rank": 17},
+    "Etcheverry":        {"first": "Tomas Martin",  "country": "AR", "rank": 53},
+    "Borges":            {"first": "Nuno",          "country": "PT", "rank": 42},
+    "Kecmanovic":        {"first": "Miomir",        "country": "RS", "rank": 56},
+    "Marozsan":          {"first": "Fabian",        "country": "HU", "rank": 61},
+    "Nava":              {"first": "Emilio",        "country": "US", "rank": 155},
+    "Ugo Carabelli":     {"first": "Camilo",        "country": "AR", "rank": 79},
+    "Buse":              {"first": "Ignacio",       "country": "PE", "rank": 205},
+    "Rublev":            {"first": "Andrey",        "country": "RU", "rank": 15},
+    "Ruud":              {"first": "Casper",        "country": "NO", "rank": 9},
+    "Safiullin":         {"first": "Roman",         "country": "RU", "rank": 81},
+    "Medjedovic":        {"first": "Hamad",         "country": "RS", "rank": 69},
+    "Hanfmann":          {"first": "Yannick",       "country": "DE", "rank": 108},
+    "Sonego":            {"first": "Lorenzo",       "country": "IT", "rank": 45},
+    "Herbert":           {"first": "Pierre-Hugues", "country": "FR", "rank": 245},
+    "Hijikata":          {"first": "Rinky",         "country": "AU", "rank": 76},
+    "Paul":              {"first": "Tommy",         "country": "US", "rank": 14},
+    "Fonseca":           {"first": "Joao",          "country": "BR", "rank": 26},
+    "Pavlovic":          {"first": "Marko",         "country": "RS", "rank": 215},
+    "Prizmic":           {"first": "Dino",          "country": "HR", "rank": 87},
+    "Dellien":           {"first": "Hugo",          "country": "BO", "rank": 150},
+    "Royer":             {"first": "Valentin",      "country": "FR", "rank": 118},
+    "Mpetshi Perricard": {"first": "Giovanni",      "country": "FR", "rank": 35},
+    "Djokovic":          {"first": "Novak",         "country": "RS", "rank": 5},
+    "Fritz":             {"first": "Taylor",        "country": "US", "rank": 4},
+    "Basavareddy":       {"first": "Nishesh",       "country": "US", "rank": 66},
+    "Shevchenko":        {"first": "Alexander",     "country": "KZ", "rank": 89},
+    "Michelsen":         {"first": "Alex",          "country": "US", "rank": 30},
+    "Duckworth":         {"first": "James",         "country": "AU", "rank": 160},
+    "Diallo":            {"first": "Gabriel",       "country": "CA", "rank": 39},
+    "Kovacevic":         {"first": "Aleksandar",    "country": "US", "rank": 75},
+    "Jodar":             {"first": "Carlos",        "country": "ES", "rank": 250},
+    "Davidovich Fokina": {"first": "Alejandro",     "country": "ES", "rank": 20},
+    "Dzumhur":           {"first": "Damir",         "country": "BA", "rank": 70},
+    "Llamas Ruiz":       {"first": "Pablo",         "country": "ES", "rank": 110},
+    "Tirante":           {"first": "Thiago Agustin","country": "AR", "rank": 100},
+    "Kokkinakis":        {"first": "Thanasi",       "country": "AU", "rank": 85},
+    "Atmane":            {"first": "Terence",       "country": "FR", "rank": 64},
+    "Carreno Busta":     {"first": "Pablo",         "country": "ES", "rank": 130},
+    "Lehecka":           {"first": "Jiri",          "country": "CZ", "rank": 18},
+    "Khachanov":         {"first": "Karen",         "country": "RU", "rank": 16},
+    "Gea":               {"first": "Pol Martin",    "country": "ES", "rank": 240},
+    "Jacquet":           {"first": "Kyrian",        "country": "FR", "rank": 200},
+    "Trungelliti":       {"first": "Marco",         "country": "AR", "rank": 220},
+    "Cina":              {"first": "Federico",      "country": "IT", "rank": 230},
+    "Opelka":            {"first": "Reilly",        "country": "US", "rank": 63},
+    "Wawrinka":          {"first": "Stan",          "country": "CH", "rank": 145},
+    "Fils":              {"first": "Arthur",        "country": "FR", "rank": 11},
+    "Humbert":           {"first": "Ugo",           "country": "FR", "rank": 25},
+    "Mannarino":         {"first": "Adrian",       "country": "FR", "rank": 91},
+    "Halys":             {"first": "Quentin",       "country": "FR", "rank": 77},
+    "Bellucci":          {"first": "Mattia",        "country": "IT", "rank": 62},
+    "Machac":            {"first": "Tomas",         "country": "CZ", "rank": 27},
+    "Bergs":             {"first": "Zizou",         "country": "BE", "rank": 44},
+    "Bonzi":             {"first": "Benjamin",      "country": "FR", "rank": 50},
+    "Zverev":            {"first": "Alexander",     "country": "DE", "rank": 3},
+}
+
+def flag(country_iso2: str) -> str:
+    """Convertit un code ISO2 en emoji drapeau."""
+    if not country_iso2 or len(country_iso2) != 2:
+        return "🏳️"
+    return chr(0x1F1E6 + ord(country_iso2[0].upper()) - ord("A")) + \
+           chr(0x1F1E6 + ord(country_iso2[1].upper()) - ord("A"))
+
+def player_info(name: str):
+    p = PLAYERS.get(name, {"first": "", "country": "", "rank": 999})
+    return p
+
+def player_label(name: str) -> str:
+    p = player_info(name)
+    fl = flag(p["country"])
+    first = p["first"]
+    rank = p["rank"]
+    rank_str = f"#{rank}" if rank and rank < 999 else "NC"
+    full = f"{first} {name}".strip()
+    return f"{fl} {full} ({rank_str})"
+
 # ── Tous les matchs du 1er tour depuis le PDF ─────────────────────────────────
 PREMIER_TOUR = [
-    # Haut du tableau
     {"id":1,  "ja":"Sinner",           "jb":"Tabur"},
     {"id":2,  "ja":"Fearnley",         "jb":"Cerundolo J.M."},
     {"id":3,  "ja":"Landaluce",        "jb":"Kopriva"},
@@ -41,7 +189,6 @@ PREMIER_TOUR = [
     {"id":29, "ja":"Gaston",           "jb":"Monfils"},
     {"id":30, "ja":"Popyrin",          "jb":"Svajda"},
     {"id":31, "ja":"Walton",           "jb":"Medvedev"},
-    # Bas du tableau
     {"id":32, "ja":"De Minaur",        "jb":"Samuel"},
     {"id":33, "ja":"Blockx",           "jb":"Navone"},
     {"id":34, "ja":"Brooksby",         "jb":"Droguet"},
@@ -104,7 +251,6 @@ def gh_load():
     r.raise_for_status()
     info = r.json()
     content = json.loads(base64.b64decode(info["content"]).decode())
-    # Assure rétrocompatibilité
     if "matchs" not in content:
         content["matchs"] = DEFAULT_STATE["matchs"]
     return content, info["sha"]
@@ -122,7 +268,6 @@ def gh_save(data, sha):
 
 # ── Fetch résultats ATP (RapidAPI) ────────────────────────────────────────────
 def fetch_atp_results():
-    """Tente de récupérer les résultats RG 2026 via API-Tennis sur RapidAPI."""
     try:
         if "rapidapi_key" not in st.secrets:
             return {}
@@ -142,7 +287,6 @@ def fetch_atp_results():
                 p1 = match.get("event_first_player", "")
                 p2 = match.get("event_second_player", "")
                 score_str = match.get("event_final_result", "")
-                winner = match.get("event_winner", "")
                 if not p1 or not p2 or not score_str:
                     continue
                 sets1, sets2 = 0, 0
@@ -154,7 +298,6 @@ def fetch_atp_results():
                             sets1 += 1
                         else:
                             sets2 += 1
-                total = sets1 + sets2
                 score_fmt = f"{max(sets1,sets2)}-{min(sets1,sets2)}"
                 w = p1 if sets1 > sets2 else p2
                 key = f"{p1.split()[-1].lower()}_{p2.split()[-1].lower()}"
@@ -166,7 +309,6 @@ def fetch_atp_results():
         return {}
 
 def fetch_livescore_scrape():
-    """Fallback : scrape livescore.com pour Roland-Garros."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -175,11 +317,9 @@ def fetch_livescore_scrape():
         r = requests.get("https://www.livescore.com/en/tennis/atp-french-open/", headers=headers, timeout=8)
         if r.status_code != 200:
             return {}
-        from html.parser import HTMLParser
         results = {}
         text = r.text
         import re
-        # Cherche les scores dans le HTML brut
         blocks = re.findall(r'"home_name":"([^"]+)","away_name":"([^"]+)".*?"home_score":"([^"]+)","away_score":"([^"]+)"', text)
         for p1, p2, s1, s2 in blocks:
             try:
@@ -198,10 +338,9 @@ def match_key(ja, jb):
     return f"{ja.split()[-1].lower()}_{jb.split()[-1].lower()}"
 
 def auto_fill_results(matchs, atp_res, ls_res):
-    """Remplit rw/rs automatiquement depuis les résultats fetchés."""
     updated = False
     for m in matchs:
-        if m["rw"]:  # déjà rempli manuellement, on ne touche pas
+        if m["rw"]:
             continue
         key  = match_key(m["ja"], m["jb"])
         key2 = match_key(m["jb"], m["ja"])
@@ -213,22 +352,41 @@ def auto_fill_results(matchs, atp_res, ls_res):
             updated = True
     return matchs, updated
 
+# ── Bonus underdog ────────────────────────────────────────────────────────────
+def underdog_multiplier(pred_winner: str, ja: str, jb: str) -> int:
+    """Si le pronostic porte sur le moins bien classé : ×2 (1-30 places d'écart), ×3 (31+)."""
+    if not pred_winner or pred_winner not in (ja, jb):
+        return 1
+    other = jb if pred_winner == ja else ja
+    r_pred  = player_info(pred_winner).get("rank", 999)
+    r_other = player_info(other).get("rank", 999)
+    # underdog = classement numériquement plus grand
+    if r_pred <= r_other:
+        return 1
+    diff = r_pred - r_other
+    if diff >= 31:
+        return 3
+    if diff >= 1:
+        return 2
+    return 1
+
 # ── Points ────────────────────────────────────────────────────────────────────
-def calc_pts(pw, ps, rw, rs, pts_w, pts_e, tour, fm):
+def calc_pts(pw, ps, rw, rs, pts_w, pts_e, tour, fm, ja="", jb=""):
     if not rw or not pw:
         return 0
     mult = fm if tour == "Finale" else 1
+    ud = underdog_multiplier(pw, ja, jb)
     if pw == rw and ps == rs:
-        return pts_e * mult
+        return pts_e * mult * ud
     if pw == rw:
-        return pts_w * mult
+        return pts_w * mult * ud
     return 0
 
 def totaux(matchs, pw, pe, fm):
     t1 = t2 = 0
     for m in matchs:
-        t1 += calc_pts(m["p1w"], m["p1s"], m["rw"], m["rs"], pw, pe, m["tour"], fm)
-        t2 += calc_pts(m["p2w"], m["p2s"], m["rw"], m["rs"], pw, pe, m["tour"], fm)
+        t1 += calc_pts(m["p1w"], m["p1s"], m["rw"], m["rs"], pw, pe, m["tour"], fm, m["ja"], m["jb"])
+        t2 += calc_pts(m["p2w"], m["p2s"], m["rw"], m["rs"], pw, pe, m["tour"], fm, m["ja"], m["jb"])
     return t1, t2
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -243,13 +401,13 @@ st.markdown("""
 .partial{color:#b87a1e;font-weight:600}
 .wrong{color:#c8432a;font-weight:600}
 .auto-badge{font-size:10px;background:#e8f4fd;color:#185FA5;padding:1px 7px;border-radius:10px;margin-left:6px}
+.underdog-badge{font-size:10px;background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:10px;margin-left:6px;font-weight:600}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Init session ──────────────────────────────────────────────────────────────
 if "data" not in st.session_state:
     data, sha = gh_load()
-    # Si les matchs stockés sont l'ancienne version (trop peu), on réinitialise
     if len(data.get("matchs", [])) < 30:
         data["matchs"] = DEFAULT_STATE["matchs"]
     st.session_state["data"] = data
@@ -262,7 +420,7 @@ def save():
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown('<p class="main-title">🎾 Paris Roland-Garros 2026</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Pronostics partagés — résultats récupérés automatiquement.</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Pronostics partagés — bonus underdog ×2 (1-30) / ×3 (31+).</p>', unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -279,6 +437,7 @@ with st.sidebar:
     pts_winner  = st.number_input("Bon vainqueur",           min_value=0, max_value=99, value=data.get("pts_winner",1))
     pts_exact   = st.number_input("Vainqueur + score exact", min_value=0, max_value=99, value=data.get("pts_exact",3))
     finale_mult = st.number_input("Multiplicateur finale ×", min_value=1, max_value=10, value=data.get("finale_mult",2))
+    st.caption("Bonus underdog : ×2 si écart de classement 1-30, ×3 si 31+.")
     if st.button("💾 Sauvegarder les règles"):
         data["pts_winner"] = pts_winner
         data["pts_exact"]  = pts_exact
@@ -318,10 +477,6 @@ with st.sidebar:
         del st.session_state["data"]
         st.rerun()
 
-# Auto-refresh toutes les 5 min
-st_autorefresh_placeholder = st.empty()
-count = st_autorefresh_placeholder.empty()
-
 # ── Scores ────────────────────────────────────────────────────────────────────
 t1, t2 = totaux(data["matchs"], pts_winner, pts_exact, finale_mult)
 c1, c2, _ = st.columns([1,1,2])
@@ -349,25 +504,31 @@ for idx, m in enumerate(data["matchs"]):
         continue
 
     ja, jb = m["ja"], m["jb"]
+    la, lb = player_label(ja), player_label(jb)
     src_badge = f'<span class="auto-badge">auto {m.get("source","")}</span>' if m.get("source") else ""
     result_str = f"✅ {m['rw']} {m['rs']}" if m["rw"] else "⏳ en attente"
-    label = f"**{ja}** vs **{jb}**  —  _{m.get('tour','1er tour')}_  —  {result_str}"
+    label = f"{la}  vs  {lb}  —  _{m.get('tour','1er tour')}_  —  {result_str}"
 
     with st.expander(label, expanded=False):
         cp1, cp2, cr = st.columns(3)
         changed = False
         opts = ["", ja, jb]
+        # libellés affichés dans les selectbox (mais valeur retournée = nom de famille)
+        def fmt(name): return player_label(name) if name else "—"
 
         with cp1:
             st.markdown(f"**{nom1}**")
-            new_p1w = st.selectbox("Vainqueur", opts,
+            new_p1w = st.selectbox("Vainqueur", opts, format_func=fmt,
                 index=opts.index(m["p1w"]) if m["p1w"] in opts else 0, key=f"p1w_{m['id']}")
             new_p1s = st.selectbox("Score", SCORES,
                 index=SCORES.index(m["p1s"]) if m["p1s"] in SCORES else 0, key=f"p1s_{m['id']}")
+            ud1 = underdog_multiplier(new_p1w, ja, jb)
+            if ud1 > 1:
+                st.markdown(f'<span class="underdog-badge">🔥 underdog ×{ud1}</span>', unsafe_allow_html=True)
             if new_p1w != m["p1w"] or new_p1s != m["p1s"]:
                 m["p1w"] = new_p1w; m["p1s"] = new_p1s; changed = True
             if m["rw"]:
-                pts = calc_pts(m["p1w"], m["p1s"], m["rw"], m["rs"], pts_winner, pts_exact, m.get("tour",""), finale_mult)
+                pts = calc_pts(m["p1w"], m["p1s"], m["rw"], m["rs"], pts_winner, pts_exact, m.get("tour",""), finale_mult, ja, jb)
                 if m["p1w"] == m["rw"] and m["p1s"] == m["rs"]:
                     st.markdown(f'<span class="correct">✓ Parfait ! +{pts} pts</span>', unsafe_allow_html=True)
                 elif m["p1w"] == m["rw"]:
@@ -377,14 +538,17 @@ for idx, m in enumerate(data["matchs"]):
 
         with cp2:
             st.markdown(f"**{nom2}**")
-            new_p2w = st.selectbox("Vainqueur ", opts,
+            new_p2w = st.selectbox("Vainqueur ", opts, format_func=fmt,
                 index=opts.index(m["p2w"]) if m["p2w"] in opts else 0, key=f"p2w_{m['id']}")
             new_p2s = st.selectbox("Score ", SCORES,
                 index=SCORES.index(m["p2s"]) if m["p2s"] in SCORES else 0, key=f"p2s_{m['id']}")
+            ud2 = underdog_multiplier(new_p2w, ja, jb)
+            if ud2 > 1:
+                st.markdown(f'<span class="underdog-badge">🔥 underdog ×{ud2}</span>', unsafe_allow_html=True)
             if new_p2w != m["p2w"] or new_p2s != m["p2s"]:
                 m["p2w"] = new_p2w; m["p2s"] = new_p2s; changed = True
             if m["rw"]:
-                pts = calc_pts(m["p2w"], m["p2s"], m["rw"], m["rs"], pts_winner, pts_exact, m.get("tour",""), finale_mult)
+                pts = calc_pts(m["p2w"], m["p2s"], m["rw"], m["rs"], pts_winner, pts_exact, m.get("tour",""), finale_mult, ja, jb)
                 if m["p2w"] == m["rw"] and m["p2s"] == m["rs"]:
                     st.markdown(f'<span class="correct">✓ Parfait ! +{pts} pts</span>', unsafe_allow_html=True)
                 elif m["p2w"] == m["rw"]:
@@ -394,7 +558,7 @@ for idx, m in enumerate(data["matchs"]):
 
         with cr:
             st.markdown(f"**Résultat réel** {src_badge}", unsafe_allow_html=True)
-            new_rw = st.selectbox("Vainqueur  ", opts,
+            new_rw = st.selectbox("Vainqueur  ", opts, format_func=fmt,
                 index=opts.index(m["rw"]) if m["rw"] in opts else 0, key=f"rw_{m['id']}")
             new_rs = st.selectbox("Score  ", SCORES,
                 index=SCORES.index(m["rs"]) if m["rs"] in SCORES else 0, key=f"rs_{m['id']}")
@@ -405,4 +569,4 @@ for idx, m in enumerate(data["matchs"]):
             save(); st.rerun()
 
 st.divider()
-st.caption(f"Roland-Garros 2026 · {len(data['matchs'])} matchs · données GitHub · fetch auto ATP+livescore")
+st.caption(f"Roland-Garros 2026 · {len(data['matchs'])} matchs · données GitHub · fetch auto ATP+livescore · bonus underdog ×2/×3")
