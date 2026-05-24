@@ -747,11 +747,23 @@ if "data" not in st.session_state:
         data["matchs"] = DEFAULT_STATE["matchs"]
     st.session_state["data"] = data
     st.session_state["sha"]  = sha
-    # Peuple les dates manquantes (ESPN + calendrier fixe) et persiste sur GitHub
-    data["matchs"], dates_changed = backfill_dates(data["matchs"])
-    # Génère les tours suivants si tous les matchs d'un tour sont terminés
+    # 1. Fetch automatique des résultats ESPN (ne touche jamais aux pronostics p1w/p1s/p2w/p2s)
+    try:
+        with st.spinner("🔄 Mise à jour automatique des résultats ESPN..."):
+            espn_auto, _ = fetch_results_espn()
+        data["matchs"], espn_updated = auto_fill_results(data["matchs"], espn_auto)
+        if espn_updated:
+            data["last_fetch"] = datetime.now().strftime("%d/%m %H:%M")
+    except Exception:
+        espn_updated = False
+    # 2. Génère les tours suivants si tous les matchs d'un tour sont terminés
     data["matchs"], rounds_added = generate_next_round(data["matchs"])
-    if dates_changed or rounds_added:
+    if rounds_added:
+        st.toast("🎾 Nouveaux matchs générés automatiquement !", icon="🎉")
+    # 3. Dates manquantes
+    data["matchs"], dates_changed = backfill_dates(data["matchs"])
+    # 4. Sauvegarde si quelque chose a changé
+    if espn_updated or rounds_added or dates_changed:
         st.session_state["sha"] = gh_save(data, st.session_state["sha"])
 
 data = st.session_state["data"]
