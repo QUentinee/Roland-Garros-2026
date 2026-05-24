@@ -289,28 +289,28 @@ def gh_save(data, sha):
 def fetch_results_espn() -> tuple[dict, str]:
     """
     Récupère les résultats terminés de Roland-Garros 2026 depuis ESPN.
-    Parcourt toutes les dates du tournoi (25 mai – 8 juin 2026).
-    Retourne ({clé: {winner, score, source}}, message).
-    La clé = "nomA_nomB" (noms de famille en minuscules).
-    Le score = "sets_gagnés_vainqueur-sets_gagnés_perdant".
+    Parcourt TOUTES les dates du tournoi (25 mai – 8 juin 2026) sans restriction
+    sur la date du serveur. Filtre uniquement les matchs terminés.
     """
     import datetime as dt
     results: dict = {}
     try:
-        today = dt.date.today()
         start = dt.date(2026, 5, 25)
         end   = dt.date(2026, 6, 8)
         cur   = start
-        while cur <= min(today, end):
+        while cur <= end:
             date_str = cur.strftime("%Y%m%d")
             cur += dt.timedelta(days=1)
             r = requests.get(ESPN_SCOREBOARD, headers=ESPN_HEADERS,
                              params={"dates": date_str, "limit": 200}, timeout=10)
             if r.status_code != 200:
                 continue
-            for ev in r.json().get("events", []):
-                if not ev.get("id", "").startswith("172-"):
-                    continue
+            events = r.json().get("events", [])
+            if not events:
+                # Pas de données pour cette date = on arrête (dates futures)
+                break
+            for ev in events:
+                # On ne filtre plus par ID — on prend tous les matchs terminés
                 comp = ev.get("competitions", [{}])[0]
                 if not comp.get("status", {}).get("type", {}).get("completed"):
                     continue
@@ -323,20 +323,21 @@ def fetch_results_espn() -> tuple[dict, str]:
                     continue
                 w_name = winner_c.get("athlete", {}).get("displayName", "")
                 l_name = loser_c.get("athlete",  {}).get("displayName", "")
+                if not w_name or not l_name:
+                    continue
                 try:
                     w_sets = int(float(winner_c.get("score", 0)))
                     l_sets = int(float(loser_c.get("score",  0)))
                 except (ValueError, TypeError):
                     w_sets, l_sets = 0, 0
                 score = f"{w_sets}-{l_sets}"
-                # Date du match depuis ESPN (format YYYY-MM-DDThh:mmZ → YYYY-MM-DD)
                 match_date = (comp.get("date") or ev.get("date") or "")[:10]
                 entry = {"winner": w_name, "score": score, "source": "ESPN", "date": match_date}
                 key1 = f"{w_name.split()[-1].lower()}_{l_name.split()[-1].lower()}"
                 key2 = f"{l_name.split()[-1].lower()}_{w_name.split()[-1].lower()}"
                 results[key1] = entry
                 results[key2] = entry
-        msg = f"✅ {len(results)//2} résultats récupérés (ESPN)" if results else "Aucun résultat ESPN (tournoi pas encore commencé ?)"
+        msg = f"✅ {len(results)//2} résultats récupérés (ESPN)" if results else "⚠️ Aucun résultat ESPN (API indisponible ou tournoi non encore commencé)"
         return results, msg
     except Exception as e:
         return {}, f"ESPN résultats erreur : {e}"
