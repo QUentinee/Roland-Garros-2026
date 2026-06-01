@@ -624,11 +624,22 @@ def underdog_multiplier(pred_winner: str, ja: str, jb: str) -> int:
         return 2
     return 1
 
+# ── Multiplicateurs par tour ──────────────────────────────────────────────────
+ROUND_MULT = {
+    "1er tour":      1,
+    "2ème tour":     1,
+    "3ème tour":     1,
+    "1/8 de finale": 1,
+    "1/4 de finale": 2,
+    "Demi-finale":   3,
+    "Finale":        4,
+}
+
 # ── Points ────────────────────────────────────────────────────────────────────
-def calc_pts(pw, ps, rw, rs, pts_w, pts_e, tour, fm, ja="", jb=""):
+def calc_pts(pw, ps, rw, rs, pts_w, pts_e, tour, fm=1, ja="", jb=""):
     if not rw or not pw:
         return 0
-    mult = fm if tour == "Finale" else 1
+    mult = ROUND_MULT.get(tour, 1)
     ud = underdog_multiplier(pw, ja, jb)
     if pw == rw and ps == rs:
         return pts_e * mult * ud
@@ -778,7 +789,7 @@ def save():
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown('<p class="main-title">🎾 Paris Roland-Garros 2026</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Pronostics partagés — bonus underdog ×2 (1-30) / ×3 (31+).</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Pronostics partagés — 1/4 ×2 · Demi ×3 · Finale ×4 — bonus underdog ×2 (1-30) / ×3 (31+).</p>', unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -794,13 +805,13 @@ with st.sidebar:
     st.subheader("Points")
     pts_winner  = st.number_input("Bon vainqueur",           min_value=0, max_value=99, value=data.get("pts_winner",1))
     pts_exact   = st.number_input("Vainqueur + score exact", min_value=0, max_value=99, value=data.get("pts_exact",3))
-    finale_mult = st.number_input("Multiplicateur finale ×", min_value=1, max_value=10, value=data.get("finale_mult",2))
-    st.caption("Bonus underdog : ×2 si écart de classement 1-30, ×3 si 31+.")
+    st.caption("🎯 Multiplicateurs par tour (fixes) : 1/4 ×2 · Demi ×3 · Finale ×4")
+    st.caption("🔥 Bonus underdog : ×2 si écart 1-30 places · ×3 si 31+")
     if st.button("💾 Sauvegarder les règles"):
         data["pts_winner"] = pts_winner
         data["pts_exact"]  = pts_exact
-        data["finale_mult"]= finale_mult
         save(); st.success("Sauvegardé !")
+    finale_mult = 1  # conservé pour compatibilité signature calc_pts
 
     st.divider()
     st.subheader("Résultats auto")
