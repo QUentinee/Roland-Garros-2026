@@ -1731,10 +1731,38 @@
       "p1s": "3-2",
       "p2w": "Berrettini",
       "p2s": "3-2",
+      "rw": "Arnaldi",
+      "rs": "",
+      "source": "manuel",
+      "date": "2026-06-03"
+    },
+    {
+      "id": 251,
+      "tour": "Demi-finale",
+      "ja": "Zverev",
+      "jb": "Mensik",
+      "date": "",
+      "p1w": "",
+      "p1s": "",
+      "p2w": "",
+      "p2s": "",
       "rw": "",
       "rs": "",
-      "source": "",
-      "date": "2026-06-03"
+      "source": ""
+    },
+    {
+      "id": 252,
+      "tour": "Demi-finale",
+      "ja": "Cobolli",
+      "jb": "Arnaldi",
+      "date": "",
+      "p1w": "",
+      "p1s": "",
+      "p2w": "",
+      "p2s": "",
+      "rw": "",
+      "rs": "",
+      "source": ""
     }
   ],
   "nom1": "Quentin",
